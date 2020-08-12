@@ -1,4 +1,9 @@
-*Migrated from https://github.com/Lekensteyn/acpi-stuff*
+Fork Details
+-----
+This is a modification of the bbswitch kernel module specifically made for the G14.
+This does *NOT* automatically detect the required ACPI calls and instead specifically 
+calls the G14's *\_ON\_* and *\_OFF* ACPI calls for the graphics card to turn off the dGPU
+completely. Using this on another system has a *razor thin chance* of working for you.
 
 About
 -----
