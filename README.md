@@ -5,6 +5,14 @@ This does *NOT* automatically detect the required ACPI calls and instead specifi
 calls the G14's *\_ON\_* and *\_OFF* ACPI calls for the graphics card to turn off the dGPU
 completely. Using this on another system has a *razor thin chance* of working for you.
 
+**NOTE**: Please make sure to blacklist nvidia,nvidia_drm,nvidia_modeset. You may also need to do 
+`alias nvidia_modeset off` to make sure nvidia_modeset doesn't get loaded with the nvidia module
+Bumblebee is unable to unload nvidia_modeset, and in bumblebee-picasso-git, it uses 'rmmod' which prevents
+the ability to use a remove alias 
+e.g. `remove nvidia /sbin/modprobe -r --ignore-remove nvidia_drm nvidia_modeset nvidia_drm`
+
+This can be patched by modifying module.c in the Bumblebee source to use 'modprobe -r' instead.
+
 About
 -----
 
