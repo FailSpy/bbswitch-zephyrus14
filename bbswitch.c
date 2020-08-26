@@ -249,14 +249,18 @@ static int bbswitch_acpi_on(void) {
 // you must check that this is '0' anytime you're wanting to interact with dis_dev.
 // Otherwise, you will segfault.
 static int is_card_disabled(void) {
-    // MAYBE: use the SGST power ACPI call here instead? (returns 0x0 if powered off)
-    struct pci_dev *pdev = NULL;
+	struct acpi_buffer buffer = { ACPI_ALLOCATE_BUFFER, NULL };
 
-    while ((pdev = pci_get_device(vendor, device, pdev)) != NULL) {
-        dis_dev = pdev;
-        return 0;
-    }
-    return 1;
+    acpi_status err = (acpi_status) 0x0000;
+    acpi_handle hnd;
+
+    acpi_get_handle(NULL, (acpi_string) "\\_SB.PCI0.GPP0.PEGP", &hnd);
+    err = acpi_evaluate_object(hnd,"SGST", NULL, &buffer);
+    int gpustatus = ((union acpi_object *)buffer.pointer)->integer.value;
+
+    kfree(buffer.pointer);
+
+    return gpustatus > 0 ? 1 : 0;
 }
 
 static void bbswitch_off(void) {
