@@ -220,6 +220,14 @@ static int bbswitch_optimus_dsm(void) {
     return 0;
 }
 
+static void get_dis_dev(void){
+    struct pci_dev *pdev = NULL;
+
+    if ((pdev = pci_get_device(vendor, device, pdev)) != NULL) {
+        dis_dev = pdev;
+    }
+}
+
 static int bbswitch_acpi_off(void) {
 	struct acpi_buffer buffer = { ACPI_ALLOCATE_BUFFER, NULL };
 
@@ -249,18 +257,29 @@ static int bbswitch_acpi_on(void) {
 // you must check that this is '0' anytime you're wanting to interact with dis_dev.
 // Otherwise, you will segfault.
 static int is_card_disabled(void) {
-    // MAYBE: use the SGST power ACPI call here instead? (returns 0x0 if powered off)
-    struct pci_dev *pdev = NULL;
+    struct acpi_buffer buffer = { ACPI_ALLOCATE_BUFFER, NULL };
 
-    while ((pdev = pci_get_device(vendor, device, pdev)) != NULL) {
-        dis_dev = pdev;
-        return 0;
+    acpi_status err = (acpi_status) 0x0000;
+    acpi_handle hnd;
+
+    acpi_get_handle(NULL, (acpi_string) "\\_SB.PCI0.GPP0.PEGP", &hnd);
+    err = acpi_evaluate_object(hnd,"SGST", NULL, &buffer);
+    int gpustatus = ((union acpi_object *)buffer.pointer)->integer.value > 0 ? 0 : 1;
+    if(gpustatus == 0){
+        get_dis_dev();
+        if(dis_dev == NULL){
+            // Card is still powering on.
+            gpustatus = -1;
+        }
     }
-    return 1;
+
+    kfree(buffer.pointer);
+
+    return gpustatus;
 }
 
 static void bbswitch_off(void) {
-    if (is_card_disabled()){
+    if (is_card_disabled() == 1){
         pr_info("discrete graphics already disabled");
         return;
     }
@@ -279,7 +298,7 @@ static void bbswitch_off(void) {
 }
 
 static void bbswitch_on(void) {
-    if (!is_card_disabled())
+    if (is_card_disabled() < 1)
         return;
 
     pr_info("enabling discrete graphics\n");
@@ -288,9 +307,10 @@ static void bbswitch_on(void) {
         pr_warn("The discrete card could not be enabled by an _ON call\n");
     
     int i = 0;
-    while(is_card_disabled()){
-        i++;
+    while(dis_dev == NULL){
         msleep(500);
+        i++;
+        get_dis_dev();
         if(i > 4){
             break;
         }
@@ -299,26 +319,31 @@ static void bbswitch_on(void) {
 
 /* power bus so we can read PCI configuration space */
 static void dis_dev_get(void) {
-    if(dis_dev == NULL || is_card_disabled()){
-        struct pci_dev *pdev = NULL;
-        while ((pdev = pci_get_device(vendor, device, pdev)) != NULL){
-            dis_dev = pdev;
-            if (dis_dev->bus && dis_dev->bus->self)
-                pm_runtime_get_sync(&dis_dev->bus->self->dev);
-            break;
+    if(is_card_disabled() < 1){
+        int i = 0;
+        while(dis_dev == NULL){
+            msleep(500);
+            i++;
+            get_dis_dev();
+            if(i > 4){
+                if(dis_dev != NULL){
+                    break;
+                }
+                else{
+                    return;
+                }
+            }
         }
-    }else{
         if (dis_dev->bus && dis_dev->bus->self)
             pm_runtime_get_sync(&dis_dev->bus->self->dev);
     }
 }
 
 static void dis_dev_put(void) {
-    if(dis_dev == NULL || is_card_disabled()){
-        return;
+    if(is_card_disabled() == 0){
+        if (dis_dev->bus && dis_dev->bus->self)
+            pm_runtime_put_sync(&dis_dev->bus->self->dev);
     }
-    if (dis_dev->bus && dis_dev->bus->self)
-        pm_runtime_put_sync(&dis_dev->bus->self->dev);
 }
 
 static ssize_t bbswitch_proc_write(struct file *fp, const char __user *buff,
@@ -348,7 +373,7 @@ static int bbswitch_proc_show(struct seq_file *seqfp, void *p) {
     // show the card state. Example output: 0000:01:00:00 ON
     dis_dev_get();
     seq_printf(seqfp, "%s %s\n", dis_dev_name,
-             is_card_disabled() ? "OFF" : "ON");
+             is_card_disabled() > 0 ? "OFF" : "ON");
     dis_dev_put();
     return 0;
 }
@@ -498,7 +523,7 @@ static int __init bbswitch_init(void) {
 
     dis_dev_get();
 
-    if (!is_card_disabled()) {
+    if (is_card_disabled() < 1) {
         /* We think the card is enabled, so ensure the kernel does as well */
         if (pci_enable_device(dis_dev))
             pr_warn("failed to enable %s\n", dis_dev_name);
@@ -511,7 +536,7 @@ static int __init bbswitch_init(void) {
     }
 
     pr_info("Succesfully loaded. Discrete card %s is %s\n",
-        dis_dev_name, is_card_disabled() ? "off" : "on");
+        dis_dev_name, is_card_disabled() > 0 ? "off" : "on");
 
     dis_dev_put();
 
@@ -531,7 +556,7 @@ static void __exit bbswitch_exit(void) {
         bbswitch_off();
 
     pr_info("Unloaded. Discrete card %s is %s\n",
-        dis_dev_name, is_card_disabled() ? "off" : "on");
+        dis_dev_name, is_card_disabled() > 0 ? "off" : "on");
 
     dis_dev_put();
 
